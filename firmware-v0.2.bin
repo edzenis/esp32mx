@@ -1,0 +1,201 @@
+```cpp
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <Preferences.h>
+#include <Update.h>
+
+// ——— Wi‑Fi Settings ———————————————————————————————
+const char WIFI_SSID[]     = "LMT_0A29";
+const char WIFI_PASSWORD[] = "nm3MHB9YbT2";
+
+// ——— MaintainX API Settings ————————————————————————
+const char MAINTX_TOKEN[] = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+                           "eyJ1c2VySWQiOjc0MjA4Nywib3JnYW5pemF0aW9uSWQiOjMzMDU2NiwiaWF0IjoxNzUy"
+                           "MTM0ODExLCJzdWIiOiJSRVNUX0FQSV9BVVRIIiwianRpIjoiYmU0ZmE4MWEtZWFmMi00"
+                           "YmY5LTlmYzYtMzFmN2I0NzRiMzljIn0."
+                           "ZAU4qG6zy_WxHgX065oNeyxmF72sb95tmECCWHJ5T9s";
+const char MAINTX_URL[]   = "https://api.getmaintainx.com/v1/meterreadings";
+
+// ——— OTA Update Settings —————————————————————————
+// Base URL where version.txt and firmware binaries are hosted
+const char OTA_BASE_URL[]      = "https://edzenis.github.io/esp32mx";
+// Check for updates every minute
+const long  OTA_CHECK_INTERVAL = 1 * 60 * 1000L;  // 1 minute
+
+// ——— Hardware & Timing ————————————————————————————
+const int  SENSOR_PIN      = 4;               // GPIO4 sensor input
+const long REPORT_INTERVAL = 60 * 1000L;      // send data every minute
+
+Preferences prefs;            // to store activeMs and current version
+unsigned long totalActiveMs;  // ms the sensor was HIGH
+unsigned long lastMillis;     // for timing loop
+unsigned long lastOtaCheck;   // when we last checked for updates
+
+// ——— Forward declarations ——————————————————————————
+void sendToMaintainX();
+bool checkForOtaUpdate();
+bool performOta(const String &binUrl);
+
+void setup() {
+  Serial.begin(115200);
+  delay(100);
+
+  // — Restore saved state: runtime and last fetched version
+  prefs.begin("app", false);
+  totalActiveMs   = prefs.getULong("activeMs", 0);
+  String savedVer = prefs.getString("ver", "");
+  Serial.println("Current firmware version: " + savedVer);
+
+  // — Prepare sensor pin
+  pinMode(SENSOR_PIN, INPUT_PULLDOWN);
+
+  // — Connect to Wi‑Fi
+  Serial.print("⏳ Connecting to Wi‑Fi");
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println(" ✅ Connected");
+
+  // — Initialize timers
+  lastMillis   = millis();
+  lastOtaCheck = millis();
+}
+
+void loop() {
+  unsigned long now   = millis();
+  unsigned long delta = now - lastMillis;
+  lastMillis = now;
+
+  // — Accumulate sensor-on time
+  if (digitalRead(SENSOR_PIN) == HIGH) {
+    totalActiveMs += delta;
+  }
+
+  // — Periodic data report
+  static unsigned long lastReport = 0;
+  if (now - lastReport >= REPORT_INTERVAL) {
+    sendToMaintainX();
+    lastReport = now;
+  }
+
+  // — Show time until next data send
+  {
+    unsigned long elapsed = now - lastReport;
+    unsigned long untilSec = (elapsed < REPORT_INTERVAL)
+                              ? (REPORT_INTERVAL - elapsed) / 1000
+                              : 0;
+    Serial.printf("⏱ Next data send in: %lus | Active: %lus\n",
+                  untilSec, totalActiveMs / 1000);
+  }
+
+  // — Periodic OTA check
+  if (now - lastOtaCheck >= OTA_CHECK_INTERVAL) {
+    if (checkForOtaUpdate()) {
+      // if update succeeds, ESP will restart
+      return;
+    }
+    lastOtaCheck = now;
+  }
+}
+
+// — Send runtime (in seconds) to MaintainX —
+void sendToMaintainX() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("⚠️ No Wi‑Fi – cannot report");
+    return;
+  }
+
+  HTTPClient http;
+  http.begin(MAINTX_URL);
+  http.addHeader("Authorization", MAINTX_TOKEN);
+  http.addHeader("Content-Type", "application/json");
+
+  unsigned long secs = totalActiveMs / 1000;
+  String payload = "[{\"meterId\":423679,\"value\":" + String(secs) + "}]";
+
+  int code = http.POST(payload);
+  if (code >= 200 && code < 300) {
+    Serial.println("✅ Data sent: " + String(code));
+    prefs.putULong("activeMs", totalActiveMs);
+  } else {
+    Serial.println("❌ Error " + String(code) + ": " + http.getString());
+  }
+  http.end();
+}
+
+// — Check GitHub-hosted version.txt and update if newer —
+bool checkForOtaUpdate() {
+  if (WiFi.status() != WL_CONNECTED) return false;
+
+  String verUrl = String(OTA_BASE_URL) + "/version.txt";
+  HTTPClient http;
+  http.begin(verUrl);
+  int code = http.GET();
+  if (code != 200) {
+    Serial.println("❌ Failed fetching version: " + String(code));
+    http.end();
+    return false;
+  }
+
+  String newVer = http.getString();
+  newVer.trim();
+  http.end();
+
+  String curVer = prefs.getString("ver", "");
+  if (newVer == curVer) {
+    Serial.println("🔁 Up-to-date: " + newVer);
+    return false;
+  }
+
+  Serial.println("⬇️ Found new version: " + newVer);
+  String binUrl = String(OTA_BASE_URL) + "/firmware-" + newVer + ".bin";
+  if (performOta(binUrl)) {
+    // Save new version and restart
+    prefs.putString("ver", newVer);
+    Serial.println("✅ OTA complete, restarting…");
+    ESP.restart();
+    return true;
+  }
+
+  Serial.println("❌ OTA failed");
+  return false;
+}
+
+// — Download .bin and apply update —
+bool performOta(const String &binUrl) {
+  Serial.println("➡️ Downloading: " + binUrl);
+  HTTPClient http;
+  http.begin(binUrl);
+  int code = http.GET();
+  if (code != 200) {
+    Serial.println("❌ Bin download failed: " + String(code));
+    http.end();
+    return false;
+  }
+
+  int len = http.getSize();
+  if (!Update.begin(len)) {
+    Serial.println("⚠️ Not enough space for OTA");
+    http.end();
+    return false;
+  }
+
+  WiFiClient *stream = http.getStreamPtr();
+  size_t written = Update.writeStream(*stream);
+  http.end();
+
+  if (written != (size_t)len) {
+    Serial.printf("⚠️ Written %u/%d bytes\n", written, len);
+    return false;
+  }
+
+  if (!Update.end() || !Update.isFinished()) {
+    Serial.printf("⚠️ Update error #%u\n", Update.getError());
+    return false;
+  }
+
+  return true;
+}
+```
