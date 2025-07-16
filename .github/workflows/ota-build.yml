@@ -1,9 +1,7 @@
 name: Build & Publish OTA Firmware
 
 on:
-  # 1) Manual “Run workflow” button
   workflow_dispatch:
-  # 2) Auto‑build when source changes
   push:
     paths:
       - 'src/**'
@@ -17,49 +15,41 @@ jobs:
     runs-on: self-hosted
 
     steps:
-      # 1) Checkout the code
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2) Reset and prepare build directory
       - name: Reset build directory
         run: |
           rm -rf build
           mkdir build
           echo "✔️  build/ is clean"
 
-      # 3) Install ESP32 core & compile into build/
-      - name: Compile firmware into build/
+      - name: Compile sketch into build/
         run: |
-          echo "🛠️  Updating core index and installing esp32:esp32"
+          echo "🛠️  Installing ESP32 core"
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
-          echo "🛠️  Compiling sketch → build/"
+
+          echo "🛠️  Compiling sketch into build/"
           arduino-cli compile \
             --fqbn esp32:esp32:esp32 \
             --output-dir build \
             src
 
-      # 4) Verify exactly 1 .bin, rename to firmware.bin
-      - name: Verify & rename binary
+      - name: Extract only the firmware .ino.bin
         run: |
-          BIN_COUNT=$(find build -maxdepth 1 -type f -name '*.bin' | wc -l)
-          echo "🔍  Found $BIN_COUNT .bin in build/:"
-          ls -1 build/*.bin || true
-
-          if [ "$BIN_COUNT" -ne 1 ]; then
-            echo "❌ Expected exactly 1 .bin, found $BIN_COUNT"
+          echo "🔍  Looking for src.ino.bin in build/"
+          if [ -f build/src.ino.bin ]; then
+            cp build/src.ino.bin build/firmware.bin
+            echo "✔️  Found and copied firmware: build/firmware.bin"
+            ls -lh build/firmware.bin
+          else
+            echo "❌  build/src.ino.bin not found!"
             exit 1
           fi
 
-          BIN_PATH=$(find build -maxdepth 1 -type f -name '*.bin' | head -n1)
-          echo "✔️  Using $BIN_PATH"
-          mv "$BIN_PATH" build/firmware.bin
-          ls -lh build/firmware.bin
-
-      # 5) Commit firmware.bin back to main
       - name: Commit firmware.bin
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
