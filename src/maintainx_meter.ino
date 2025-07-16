@@ -1,4 +1,4 @@
-#include <WiFi.h>                 // Let ESP32 talk to Wi‑Fi
+#include <WiFi.h>                 // Let ESP32 talk to Wi‑Fi 1
 #include <HTTPClient.h>           // Let ESP32 make HTTP requests
 #include <HTTPUpdate.h>           // Let ESP32 update its own firmware
 #include <WiFiClientSecure.h>     // Let ESP32 do HTTPS requests
