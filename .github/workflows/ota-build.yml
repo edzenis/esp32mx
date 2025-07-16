@@ -12,29 +12,25 @@ jobs:
     runs-on: self-hosted
 
     steps:
-      # 1) Check out the repository
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2) Compile the firmware using the already‑installed Arduino CLI
       - name: Compile firmware
         run: |
           echo "Using Arduino CLI at $(which arduino-cli)"
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
-          arduino-cli compile --fqbn esp32:esp32:esp32 src/maintainx_meter.ino
+          echo "Building sketch from src/src.ino"
+          arduino-cli compile --fqbn esp32:esp32:esp32 src
 
-      # 3) Prepare firmware.bin for OTA
       - name: Prepare firmware.bin
         run: |
           mkdir -p build
           cp $(find . -name '*.ino.bin') build/firmware.bin
-          echo "Built firmware:"
           ls -lh build/firmware.bin
 
-      # 4) Commit the new firmware.bin back to the main branch
       - name: Commit firmware.bin
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
