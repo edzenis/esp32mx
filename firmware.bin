@@ -16,8 +16,10 @@ const char* MAINTX_TOKEN  =
 const char* MAINTX_URL    = "https://api.getmaintainx.com/v1/meterreadings"; 
 const char* METER_ID      = "423679";          // Your meter ID
 
-// Base URL for OTA files (only firmware.bin + version.txt in repo)
-const char* OTA_BASE_URL  = "https://raw.githubusercontent.com/edzenis/esp32mx/main";
+// —— NEW: direct raw URLs for OTA ——
+const char* VERSION_URL  = "https://raw.githubusercontent.com/edzenis/esp32mx/refs/heads/main/version.txt";
+const char* FIRMWARE_URL = "https://raw.githubusercontent.com/edzenis/esp32mx/refs/heads/main/firmware.bin";
+
 const int   SENSOR_PIN    = 4;                 // Which pin your sensor is on
 
 // ===== STATE =====
@@ -87,6 +89,7 @@ void loop() {
   // --- OTA every 60 seconds ---
   if (now - lastOtaMs >= 60000UL) {
     Serial.println("\n=== OTA Check ===");
+
     // 1) Read saved version
     float oldVer = prefs.getFloat("ver", 0.0);
     Serial.print("Saved version: "); Serial.println(oldVer);
@@ -95,26 +98,32 @@ void loop() {
     WiFiClientSecure client;          // HTTPS client
     client.setInsecure();             // Skip certificate checks
     HTTPClient httpV;
-    String versionUrl = String(OTA_BASE_URL) + "/version.txt";
     Serial.println("Fetching version.txt...");
-    httpV.begin(client, versionUrl);
+    httpV.begin(client, VERSION_URL); // Use direct version URL
     int vcode = httpV.GET();          // GET version.txt
     if (vcode == HTTP_CODE_OK) {
-      String newVerStr = httpV.getString(); // Read text
-      newVerStr.trim();                // Trim whitespace/newlines
+      String newVerStr = httpV.getString(); // Read the raw text
+      newVerStr.trim();                // Remove whitespace/newlines
+      Serial.print("Raw repo version: "); Serial.println(newVerStr);
+
+      // Strip leading “v” if you ever accidentally include it
+      if (newVerStr.startsWith("v") || newVerStr.startsWith("V")) {
+        newVerStr = newVerStr.substring(1);
+        Serial.print("Stripped leading 'v', now: "); Serial.println(newVerStr);
+      }
+
       float newVer = newVerStr.toFloat(); // Convert to float
-      Serial.print("Repo version: "); Serial.println(newVer);
+      Serial.print("Parsed repo version: "); Serial.println(newVer);
 
       // 3) Compare versions
       if (newVer > oldVer) {
         Serial.println("New version found! Starting OTA...");
 
         // 3a) Download firmware.bin
-        String binUrl = String(OTA_BASE_URL) + "/firmware.bin";
-        Serial.println("Firmware URL: " + binUrl);
+        Serial.println("Fetching firmware.bin...");
         HTTPClient httpB;
-        httpB.begin(client, binUrl);
-        int bcode = httpB.GET();       // GET firmware
+        httpB.begin(client, FIRMWARE_URL); // Use direct firmware URL
+        int bcode = httpB.GET();       // GET firmware.bin
         if (bcode == HTTP_CODE_OK) {
           int len = httpB.getSize();   // Get size in bytes
           Serial.print("Firmware size: "); Serial.println(len);
@@ -136,7 +145,7 @@ void loop() {
               Serial.println("%");
             }
 
-            // 3d) Finalize
+            // 3d) Finish up
             if (Update.end() && Update.isFinished()) {
               Serial.println("OTA successful!");
               prefs.putFloat("ver", newVer); // Save new version
@@ -165,4 +174,3 @@ void loop() {
     Serial.println("=== OTA Done ===\n");
   }
 }
-
