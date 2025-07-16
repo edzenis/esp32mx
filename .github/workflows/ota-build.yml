@@ -1,7 +1,9 @@
 name: Build & Publish OTA Firmware
 
 on:
+  # Manual “Run workflow” button in Actions UI
   workflow_dispatch:
+  # Auto‑build on any changes under src/
   push:
     paths:
       - 'src/**'
@@ -15,46 +17,45 @@ jobs:
     runs-on: self-hosted
 
     steps:
-      - name: Checkout code
+      # 1) Checkout your code
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # 2) Clean out and recreate build/
       - name: Reset build directory
         run: |
           rm -rf build
           mkdir build
-          echo "✔️  build/ is clean"
 
-      - name: Compile sketch into build/
+      # 3) Compile into build/
+      - name: Compile firmware
         run: |
-          echo "🛠️  Installing ESP32 core"
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
-
-          echo "🛠️  Compiling sketch into build/"
           arduino-cli compile \
             --fqbn esp32:esp32:esp32 \
             --output-dir build \
             src
 
-      - name: Extract only the firmware .ino.bin
+      # 4) Isolate only the firmware image
+      - name: Prepare firmware.bin
         run: |
-          echo "🔍  Looking for src.ino.bin in build/"
-          if [ -f build/src.ino.bin ]; then
-            cp build/src.ino.bin build/firmware.bin
-            echo "✔️  Found and copied firmware: build/firmware.bin"
-            ls -lh build/firmware.bin
-          else
-            echo "❌  build/src.ino.bin not found!"
+          if [ ! -f build/src.ino.bin ]; then
+            echo "❌ build/src.ino.bin not found"
             exit 1
           fi
+          mv build/src.ino.bin build/firmware.bin
+          ls -lh build/firmware.bin
 
-      - name: Commit firmware.bin
-        uses: stefanzweifel/git-auto-commit-action@v4
-        with:
-          commit_message: "🔄 Automated firmware build for version $(cat version.txt)"
-          file_pattern: build/firmware.bin
-          branch: main
-          author_name: github-actions
-          author_email: github-actions@users.noreply.github.com
+      # 5) Commit & push via plain git
+      - name: Commit & Push firmware.bin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add build/firmware.bin
+          git diff --quiet --exit-code || git commit -m "🔄 Automated firmware build for version $(cat version.txt)"
+          git push origin HEAD:main
