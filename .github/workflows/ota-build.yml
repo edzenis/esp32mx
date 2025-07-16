@@ -12,40 +12,34 @@ jobs:
     runs-on: self-hosted
 
     steps:
-      - name: Checkout code  
-        uses: actions/checkout@v4  
-        with:  
-          fetch-depth: 0  
+      # 1) Check out the repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Install Arduino CLI via install.sh  
-        run: |  
-          CLI_VER=0.36.2  
-          echo "Installing Arduino CLI v${CLI_VER}…"  
-          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \  
-            | sh -s ${CLI_VER}  
-          echo "Adding \$PWD/bin to PATH"  
-          echo "${{ github.workspace }}/bin" >> $GITHUB_PATH  
-          echo "arduino-cli → $(which arduino-cli)"  
-          arduino-cli version  
+      # 2) Compile the firmware using the already‑installed Arduino CLI
+      - name: Compile firmware
+        run: |
+          echo "Using Arduino CLI at $(which arduino-cli)"
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+          arduino-cli compile --fqbn esp32:esp32:esp32 src/maintainx_meter.ino
 
-      - name: Compile firmware  
-        run: |  
-          echo "Updating index & installing ESP32 core…"  
-          arduino-cli core update-index  
-          arduino-cli core install esp32:esp32  
-          echo "Building sketch…"  
-          arduino-cli compile --fqbn esp32:esp32:esp32 src/maintainx_meter.ino  
+      # 3) Prepare firmware.bin for OTA
+      - name: Prepare firmware.bin
+        run: |
+          mkdir -p build
+          cp $(find . -name '*.ino.bin') build/firmware.bin
+          echo "Built firmware:"
+          ls -lh build/firmware.bin
 
-      - name: Prepare firmware.bin  
-        run: |  
-          mkdir -p build  
-          cp $(find . -name '*.ino.bin') build/firmware.bin  
-
-      - name: Commit firmware.bin  
-        uses: stefanzweifel/git-auto-commit-action@v4  
-        with:  
-          commit_message: "🔄 Automated firmware build for version $(cat version.txt)"  
-          file_pattern: build/firmware.bin  
-          branch: main  
-          author_name: github-actions  
-          author_email: github-actions@users.noreply.github.com  
+      # 4) Commit the new firmware.bin back to the main branch
+      - name: Commit firmware.bin
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_message: "🔄 Automated firmware build for version $(cat version.txt)"
+          file_pattern: build/firmware.bin
+          branch: main
+          author_name: github-actions
+          author_email: github-actions@users.noreply.github.com
