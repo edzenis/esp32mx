@@ -1,17 +1,15 @@
 name: Build & Publish OTA Firmware
 
-# Run only when you click “Run workflow”
 on:
   workflow_dispatch:
 
-# Only one in‑flight build at a time
 concurrency:
   group: ota-build-main
   cancel-in-progress: true
 
 jobs:
   build:
-    runs-on: self-hosted    # your own runner
+    runs-on: self-hosted
 
     steps:
       - name: Checkout code
@@ -20,7 +18,7 @@ jobs:
       - name: Install Arduino CLI
         uses: arduino/setup-arduino-cli@v2
         with:
-          version: latest    # pull the latest CLI release
+          version: '0.36.2'     # Pin to a real Arduino CLI release
 
       - name: Compile firmware
         run: |
