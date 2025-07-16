@@ -26,7 +26,9 @@ jobs:
           mkdir -p arduino-cli
           tar -xzf arduino-cli.tar.gz -C arduino-cli
           echo "Adding Arduino CLI to PATH"
-          echo "${{ github.workspace }}/arduino-cli/bin" >> $GITHUB_PATH
+          echo "${{ github.workspace }}/arduino-cli" >> $GITHUB_PATH
+          echo "Verifying Arduino CLI install"
+          arduino-cli version
 
       - name: Compile firmware
         run: |
