@@ -4,7 +4,7 @@ on:
   push:
     paths:
       - 'src/**'
-      - 'version.txt'
+  workflow_dispatch:
 
 jobs:
   build:
