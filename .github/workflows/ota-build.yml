@@ -19,16 +19,19 @@ jobs:
 
       - name: Compile firmware
         run: |
-          echo "Using Arduino CLI at $(which arduino-cli)"
+          echo "Updating core and installing ESP32 platform"
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
-          echo "Building sketch from src/src.ino"
-          arduino-cli compile --fqbn esp32:esp32:esp32 src
+          echo "Building sketch into build/ dir"
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32 \
+            --output-dir build \
+            src
 
       - name: Prepare firmware.bin
         run: |
-          mkdir -p build
-          cp $(find . -name '*.ino.bin') build/firmware.bin
+          echo "Renaming .bin to firmware.bin"
+          mv build/*.bin build/firmware.bin
           ls -lh build/firmware.bin
 
       - name: Commit firmware.bin
