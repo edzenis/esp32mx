@@ -1,25 +1,40 @@
+name: Build & Publish OTA Firmware
+
+on:
+  # Auto‑build when code under src/ changes
+  push:
+    paths:
+      - 'src/**'
+  # Manual trigger in the Actions tab
+  workflow_dispatch:
+
+concurrency:
+  group: ota-build-main
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: self-hosted
+
     steps:
-      - uses: actions/checkout@v4
-        with: fetch-depth: 0
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Compile firmware
         run: |
           echo "Updating core & installing ESP32 platform"
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
-          echo "Building sketch in src/ (will drop .ino.bin somewhere)"
+          echo "Building sketch in src/"
           arduino-cli compile --fqbn esp32:esp32:esp32 src
 
       - name: Prepare firmware.bin
         run: |
           mkdir -p build
-          echo "Locating the compiled .ino.bin file..."
           BIN=$(find . -type f -name '*.ino.bin' | head -n1)
           echo "Found binary: $BIN"
-          [ -f "$BIN" ] || { echo "❌ No .ino.bin found!"; exit 1; }
           cp "$BIN" build/firmware.bin
           ls -lh build/firmware.bin
 
