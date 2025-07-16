@@ -14,16 +14,26 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Install Arduino CLI
-        uses: arduino/setup-arduino-cli@v2
         with:
-          version: '0.36.2'     # Pin to a real Arduino CLI release
+          fetch-depth: 0
+
+      - name: Download Arduino CLI
+        run: |
+          CLI_VER=0.36.2
+          echo "Downloading Arduino CLI v${CLI_VER}..."
+          curl -SL https://downloads.arduino.cc/arduino-cli/arduino-cli_${CLI_VER}_Linux_64bit.tar.gz \
+            -o arduino-cli.tar.gz
+          mkdir -p arduino-cli
+          tar -xzf arduino-cli.tar.gz -C arduino-cli
+          echo "Adding Arduino CLI to PATH"
+          echo "${{ github.workspace }}/arduino-cli/bin" >> $GITHUB_PATH
 
       - name: Compile firmware
         run: |
+          echo "Updating index and installing ESP32 core"
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
+          echo "Building sketch"
           arduino-cli compile --fqbn esp32:esp32:esp32 src/maintainx_meter.ino
 
       - name: Prepare firmware.bin
