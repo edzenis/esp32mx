@@ -20,14 +20,16 @@ jobs:
       - name: Download Arduino CLI
         run: |
           CLI_VER=0.36.2
-          echo "Downloading Arduino CLI v${CLI_VER}..."
-          curl -SL https://downloads.arduino.cc/arduino-cli/arduino-cli_${CLI_VER}_Linux_64bit.tar.gz \
+          echo "Downloading Arduino CLI v${CLI_VER} from GitHub releases…"
+          curl -SL \
+            https://github.com/arduino/arduino-cli/releases/download/${CLI_VER}/arduino-cli_${CLI_VER}_Linux_64bit.tar.gz \
             -o arduino-cli.tar.gz
+          echo "Archive contents:"
+          tar tzf arduino-cli.tar.gz
           mkdir -p arduino-cli
-          tar -xzf arduino-cli.tar.gz -C arduino-cli
-          echo "Adding Arduino CLI to PATH"
+          tar xzf arduino-cli.tar.gz -C arduino-cli
           echo "${{ github.workspace }}/arduino-cli" >> $GITHUB_PATH
-          echo "Verifying Arduino CLI install"
+          echo "arduino-cli now on PATH → $(which arduino-cli)"
           arduino-cli version
 
       - name: Compile firmware
