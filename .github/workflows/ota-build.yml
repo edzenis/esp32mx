@@ -12,44 +12,40 @@ jobs:
     runs-on: self-hosted
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - name: Checkout code  
+        uses: actions/checkout@v4  
+        with:  
+          fetch-depth: 0  
 
-      - name: Download Arduino CLI
-        run: |
-          CLI_VER=0.36.2
-          echo "Downloading Arduino CLI v${CLI_VER} from GitHub releases…"
-          curl -SL \
-            https://github.com/arduino/arduino-cli/releases/download/${CLI_VER}/arduino-cli_${CLI_VER}_Linux_64bit.tar.gz \
-            -o arduino-cli.tar.gz
-          echo "Archive contents:"
-          tar tzf arduino-cli.tar.gz
-          mkdir -p arduino-cli
-          tar xzf arduino-cli.tar.gz -C arduino-cli
-          echo "${{ github.workspace }}/arduino-cli" >> $GITHUB_PATH
-          echo "arduino-cli now on PATH → $(which arduino-cli)"
-          arduino-cli version
+      - name: Install Arduino CLI via install.sh  
+        run: |  
+          CLI_VER=0.36.2  
+          echo "Installing Arduino CLI v${CLI_VER}…"  
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \  
+            | sh -s ${CLI_VER}  
+          echo "Adding \$PWD/bin to PATH"  
+          echo "${{ github.workspace }}/bin" >> $GITHUB_PATH  
+          echo "arduino-cli → $(which arduino-cli)"  
+          arduino-cli version  
 
-      - name: Compile firmware
-        run: |
-          echo "Updating index and installing ESP32 core"
-          arduino-cli core update-index
-          arduino-cli core install esp32:esp32
-          echo "Building sketch"
-          arduino-cli compile --fqbn esp32:esp32:esp32 src/maintainx_meter.ino
+      - name: Compile firmware  
+        run: |  
+          echo "Updating index & installing ESP32 core…"  
+          arduino-cli core update-index  
+          arduino-cli core install esp32:esp32  
+          echo "Building sketch…"  
+          arduino-cli compile --fqbn esp32:esp32:esp32 src/maintainx_meter.ino  
 
-      - name: Prepare firmware.bin
-        run: |
-          mkdir -p build
-          cp $(find . -name '*.ino.bin') build/firmware.bin
+      - name: Prepare firmware.bin  
+        run: |  
+          mkdir -p build  
+          cp $(find . -name '*.ino.bin') build/firmware.bin  
 
-      - name: Commit firmware.bin
-        uses: stefanzweifel/git-auto-commit-action@v4
-        with:
-          commit_message: "🔄 Automated firmware build for version $(cat version.txt)"
-          file_pattern: build/firmware.bin
-          branch: main
-          author_name: github-actions
-          author_email: github-actions@users.noreply.github.com
+      - name: Commit firmware.bin  
+        uses: stefanzweifel/git-auto-commit-action@v4  
+        with:  
+          commit_message: "🔄 Automated firmware build for version $(cat version.txt)"  
+          file_pattern: build/firmware.bin  
+          branch: main  
+          author_name: github-actions  
+          author_email: github-actions@users.noreply.github.com  
