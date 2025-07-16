@@ -1,37 +1,49 @@
 name: Build & Publish OTA Firmware
 
+# Trigger on any change under src/, or manually via the Actions UI
 on:
   push:
     paths:
       - 'src/**'
   workflow_dispatch:
 
+# Ensure only one build at a time; new runs cancel in‑progress/queued ones
+concurrency:
+  group: ota-build-main
+  cancel-in-progress: true
+
 jobs:
   build:
+    # Use your own self‑hosted runner so you never queue
     runs-on: self-hosted
 
     steps:
-      - uses: actions/checkout@v4
+      # 1) Check out your repo
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # 2) Install the Arduino CLI
       - name: Install Arduino CLI
-  uses: arduino/setup-arduino-cli@v2
-  with:
-    version: '1.8.5'
+        uses: arduino/setup-arduino-cli@v2
+        with:
+          version: '1.8.5'
 
-
+      # 3) Compile your sketch
       - name: Compile firmware
         run: |
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
           arduino-cli compile --fqbn esp32:esp32:esp32 src/maintainx_meter.ino
 
+      # 4) Copy the generated .bin to firmware.bin
       - name: Prepare firmware.bin
         run: |
           mkdir -p build
           cp $(find . -name '*.ino.bin') build/firmware.bin
 
+      # 5) Commit and push firmware.bin back to main
       - name: Commit firmware.bin
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
