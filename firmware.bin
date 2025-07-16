@@ -1,1 +1,168 @@
+#include <WiFi.h>                 // Let ESP32 talk to Wi‑Fi
+#include <HTTPClient.h>           // Let ESP32 make HTTP requests
+#include <Update.h>               // Let ESP32 write new firmware to flash
+#include <WiFiClientSecure.h>     // Let ESP32 do HTTPS
+#include <Preferences.h>          // Let ESP32 save data in its flash
+
+// ===== USER CONFIG =====
+const char* WIFI_SSID     = "LMT_0A29";   // Your Wi‑Fi name
+const char* WIFI_PASSWORD = "nm3MHB9YbT2";// Your Wi‑Fi password
+
+// Full-length MaintainX API token
+const char* MAINTX_TOKEN  =
+  "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+  "eyJ1c2VySWQiOjc0MjA4Nywib3JnYW5pemF0aW9uSWQiOjMzMDU2NiwiaWF0IjoxNzUyMTM0ODExLCJzdWIiOiJSRVNUX0FQSV9BVVRIIiwianRpIjoiYmU0ZmE4MWEtZWFmMi00YmY5LTlmYzYtMzFmN2I0NzRiMzljIn0."
+  "ZAU4qG6zy_WxHgX065oNeyxmF72sb95tmECCWHJ5T9s";
+const char* MAINTX_URL    = "https://api.getmaintainx.com/v1/meterreadings"; 
+const char* METER_ID      = "423679";          // Your meter ID
+
+// Base URL for OTA files (only firmware.bin + version.txt in repo)
+const char* OTA_BASE_URL  = "https://raw.githubusercontent.com/edzenis/esp32mx/main";
+const int   SENSOR_PIN    = 4;                 // Which pin your sensor is on
+
+// ===== STATE =====
+Preferences prefs;     // Flash storage for version & meter data
+unsigned long activeMs     = 0; // ms sensor was HIGH
+unsigned long lastLoopMs   = 0; // Last millis() for loop timing
+unsigned long lastReportMs = 0; // Last millis() we reported
+unsigned long lastOtaMs    = 0; // Last millis() we checked OTA
+
+void setup() {
+  Serial.begin(115200);        // Open Serial at 115200 for debug
+  delay(100);                  // Short pause
+
+  prefs.begin("app", false);   // Open flash storage named "app"
+  activeMs = prefs.getULong("activeMs", 0); // Load saved sensor time
+  float ver = prefs.getFloat("ver", 0.0);    // Load saved version
+  Serial.println("Boot version: " + String(ver)); // Print saved version
+
+  pinMode(SENSOR_PIN, INPUT_PULLDOWN);       // Prepare sensor pin
+
+  // --- Connect to Wi‑Fi ---
+  Serial.print("WiFi connecting to "); Serial.println(WIFI_SSID);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) { // Wait for connection
+    delay(500); Serial.print('.');       // Print dots while waiting
+  }
+  Serial.println();
+  Serial.println("WiFi connected: " + WiFi.localIP().toString());
+
+  lastLoopMs   = millis();  // Initialize loop timer
+  lastReportMs = lastLoopMs;
+  lastOtaMs    = lastLoopMs;
+}
+
+void loop() {
+  unsigned long now   = millis();            // Current time
+  unsigned long delta = now - lastLoopMs;    // Time since last loop
+  lastLoopMs = now;                          // Save for next iteration
+
+  // --- Count sensor HIGH time ---
+  if (digitalRead(SENSOR_PIN) == HIGH) {
+    activeMs += delta;                      // Accumulate active ms
+  }
+
+  // --- REPORT to MaintainX every 60 seconds ---
+  if (now - lastReportMs >= 60000UL) {
+    Serial.println("Reporting to MaintainX...");
+    HTTPClient http;
+    http.begin(MAINTX_URL);                  // Set API endpoint
+    http.addHeader("Authorization", MAINTX_TOKEN);
+    http.addHeader("Content-Type", "application/json");
+    unsigned long secs = activeMs / 1000;    // Convert ms → s
+    String body = "[{\"meterId\":" + String(METER_ID)
+                + ",\"value\":"   + String(secs) + "}]";
+    int code = http.POST(body);              // Send data
+    Serial.println("Report HTTP code: " + String(code));
+    if (code >= 200 && code < 300) {         // On success
+      prefs.putULong("activeMs", activeMs);  // Save progress
+      Serial.println("MaintainX data saved");
+    } else {
+      Serial.println("MaintainX report failed");
+    }
+    http.end();                              // Close connection
+    lastReportMs = now;                      // Reset report timer
+  }
+
+  // --- OTA every 60 seconds ---
+  if (now - lastOtaMs >= 60000UL) {
+    Serial.println("\n=== OTA Check ===");
+    // 1) Read saved version
+    float oldVer = prefs.getFloat("ver", 0.0);
+    Serial.print("Saved version: "); Serial.println(oldVer);
+
+    // 2) Fetch version.txt
+    WiFiClientSecure client;          // HTTPS client
+    client.setInsecure();             // Skip certificate checks
+    HTTPClient httpV;
+    String versionUrl = String(OTA_BASE_URL) + "/version.txt";
+    Serial.println("Fetching version.txt...");
+    httpV.begin(client, versionUrl);
+    int vcode = httpV.GET();          // GET version.txt
+    if (vcode == HTTP_CODE_OK) {
+      String newVerStr = httpV.getString(); // Read text
+      newVerStr.trim();                // Trim whitespace/newlines
+      float newVer = newVerStr.toFloat(); // Convert to float
+      Serial.print("Repo version: "); Serial.println(newVer);
+
+      // 3) Compare versions
+      if (newVer > oldVer) {
+        Serial.println("New version found! Starting OTA...");
+
+        // 3a) Download firmware.bin
+        String binUrl = String(OTA_BASE_URL) + "/firmware.bin";
+        Serial.println("Firmware URL: " + binUrl);
+        HTTPClient httpB;
+        httpB.begin(client, binUrl);
+        int bcode = httpB.GET();       // GET firmware
+        if (bcode == HTTP_CODE_OK) {
+          int len = httpB.getSize();   // Get size in bytes
+          Serial.print("Firmware size: "); Serial.println(len);
+
+          // 3b) Begin flashing
+          if (Update.begin(len)) {
+            Serial.println("Begin OTA...");
+            WiFiClient *stream = httpB.getStreamPtr();
+            size_t written = 0;
+
+            // 3c) Stream and write in chunks
+            while (stream->available()) {
+              uint8_t buf[128];
+              int r = stream->readBytes(buf, sizeof(buf));
+              Update.write(buf, r);      // Write chunk
+              written += r;              // Update progress
+              int pct = (written * 100) / len;
+              Serial.print("OTA Progress: "); Serial.print(pct);
+              Serial.println("%");
+            }
+
+            // 3d) Finalize
+            if (Update.end() && Update.isFinished()) {
+              Serial.println("OTA successful!");
+              prefs.putFloat("ver", newVer); // Save new version
+              Serial.println("Version saved. Rebooting...");
+              ESP.restart();               // Restart into new firmware
+            } else {
+              Serial.println("OTA failed to finish");
+              Serial.println(Update.errorString());
+            }
+          } else {
+            Serial.println("Not enough space for OTA");
+            Serial.println(Update.errorString());
+          }
+        } else {
+          Serial.printf("Firmware GET failed, HTTP %d\n", bcode);
+        }
+        httpB.end();                   // Close firmware request
+      } else {
+        Serial.println("No newer version");
+      }
+    } else {
+      Serial.printf("version.txt fetch failed, HTTP %d\n", vcode);
+    }
+    httpV.end();                      // Close version request
+    lastOtaMs = now;                  // Reset OTA timer
+    Serial.println("=== OTA Done ===\n");
+  }
+}
 
