@@ -8,9 +8,10 @@
  * CHANGE LOG
  * ----------
  * 2025-07-17: Added per-second Serial countdown for both the next MaintainX report
- *             and the next OTA check. Cleaned up string literals that were damaged
- *             during copy/paste. No functional changes to reporting or OTA other
- *             than the new countdown prints.
+ *             and the next OTA check.
+ * 2025-07-17b: Debug update – ensure countdown prints immediately after setup,
+ *             and prints reliably even if long blocking HTTP calls occur.
+ *             (We print BEFORE running report/OTA blocks each loop.)
  */
 
 // ===== USER CONFIG =====
@@ -44,9 +45,28 @@ unsigned long lastReportMs    = 0; // Timestamp of last MaintainX report
 unsigned long lastOtaMs       = 0; // Timestamp of last OTA check
 unsigned long lastCountdownMs = 0; // Timestamp of last countdown print
 
+// -----------------------------------------------------------------------------
+// Helper: print combined countdown line (report + OTA)
+// Call with current millis().
+// -----------------------------------------------------------------------------
+static inline void printCountdown(unsigned long now) {
+  unsigned long sinceReport = now - lastReportMs;
+  unsigned long untilReport = (sinceReport < REPORT_INTERVAL) ? (REPORT_INTERVAL - sinceReport) : 0;
+  unsigned long secsReportLeft = (untilReport + 999UL) / 1000UL;  // round up to s
+
+  unsigned long sinceOta = now - lastOtaMs;
+  unsigned long untilOta = (sinceOta < OTA_INTERVAL) ? (OTA_INTERVAL - sinceOta) : 0;
+  unsigned long secsOtaLeft = (untilOta + 999UL) / 1000UL;        // round up to s
+
+  Serial.print("Next report in "); Serial.print(secsReportLeft); Serial.print(" s");
+  Serial.print(" | Next OTA check in "); Serial.print(secsOtaLeft); Serial.println(" s");
+}
+
 void setup() {
   Serial.begin(115200);         // Open Serial for debug
   delay(100);                   // Wait a bit for Serial
+  Serial.println();
+  Serial.println("=== Booting ESP32MX (Countdown build) ===");
 
   prefs.begin("app", false);    // Open flash storage named "app"
   activeMs = prefs.getULong("activeMs", 0);  // Load saved sensor time
@@ -69,7 +89,10 @@ void setup() {
   lastLoopMs      = millis();
   lastReportMs    = lastLoopMs;
   lastOtaMs       = lastLoopMs;
-  lastCountdownMs = lastLoopMs;
+  lastCountdownMs = lastLoopMs;  // force immediate 1s countdown schedule
+
+  // Give immediate visual feedback so you know countdown code is active.
+  Serial.println("Countdown timers armed. First countdown line in ~1s...");
 }
 
 void loop() {
@@ -85,23 +108,7 @@ void loop() {
   // --- Per-second countdown prints (MaintainX report + OTA check) ---
   if (now - lastCountdownMs >= COUNTDOWN_INTERVAL) {  // once per second
     lastCountdownMs = now;                            // reset countdown timer
-
-    // MaintainX report countdown
-    unsigned long sinceReport = now - lastReportMs;                 // ms since last report
-    unsigned long untilReport = (sinceReport < REPORT_INTERVAL)     // if < interval
-                              ? (REPORT_INTERVAL - sinceReport)     // time left
-                              : 0;                                  // otherwise 0
-    unsigned long secsReportLeft = (untilReport + 999UL) / 1000UL;  // round up to s
-
-    // OTA check countdown
-    unsigned long sinceOta = now - lastOtaMs;                        // ms since last OTA check
-    unsigned long untilOta = (sinceOta < OTA_INTERVAL)               // if < interval
-                           ? (OTA_INTERVAL - sinceOta)               // time left
-                           : 0;                                      // otherwise 0
-    unsigned long secsOtaLeft = (untilOta + 999UL) / 1000UL;         // round up to s
-
-    Serial.print("Next report in "); Serial.print(secsReportLeft); Serial.print(" s");
-    Serial.print(" | Next OTA check in "); Serial.print(secsOtaLeft); Serial.println(" s");
+    printCountdown(now);                              // do the print
   }
 
   // --- REPORT to MaintainX every REPORT_INTERVAL ---
@@ -127,6 +134,9 @@ void loop() {
     }
     http.end();                               // Close HTTP connection
     lastReportMs = now;                       // Reset timer
+
+    // Immediately show fresh countdown after a report (avoids waiting up to 1s)
+    printCountdown(now);
   }
 
   // --- OTA update every OTA_INTERVAL ---
@@ -189,5 +199,8 @@ void loop() {
     lastOtaMs = now;                          // Reset OTA timer
     Serial.println("=== OTA Done ===");
     Serial.println();
+
+    // Immediately show fresh countdown after OTA (avoids waiting up to 1s)
+    printCountdown(now);
   }
 }
