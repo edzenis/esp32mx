@@ -1,14 +1,23 @@
-#include <WiFi.h>                 // Let ESP32 talk to Wi‑Fi 1
+#include <WiFi.h>                 // Let ESP32 talk to Wi-Fi
 #include <HTTPClient.h>           // Let ESP32 make HTTP requests
 #include <HTTPUpdate.h>           // Let ESP32 update its own firmware
 #include <WiFiClientSecure.h>     // Let ESP32 do HTTPS requests
 #include <Preferences.h>          // Let ESP32 save data in its flash
 
-// ===== USER CONFIG =====
-const char* WIFI_SSID     = "LMT_0A29";   // Your Wi‑Fi SSID
-const char* WIFI_PASSWORD = "nm3MHB9YbT2";// Your Wi‑Fi password
+/*
+ * CHANGE LOG
+ * ----------
+ * 2025-07-17: Added per-second Serial countdown for both the next MaintainX report
+ *             and the next OTA check. Cleaned up string literals that were damaged
+ *             during copy/paste. No functional changes to reporting or OTA other
+ *             than the new countdown prints.
+ */
 
-// **Full‑length** MaintainX API token—never omit or truncate this!
+// ===== USER CONFIG =====
+const char* WIFI_SSID     = "LMT_0A29";    // Your Wi-Fi SSID
+const char* WIFI_PASSWORD = "nm3MHB9YbT2"; // Your Wi-Fi password
+
+// **Full-length** MaintainX API token—never omit or truncate this!
 const char* MAINTX_TOKEN  =
   "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
   "eyJ1c2VySWQiOjc0MjA4Nywib3JnYW5pemF0aW9uSWQiOjMzMDU2NiwiaWF0IjoxNzUyMTM0ODExLCJzdWIiOiJSRVNUX0FQSV9BVVRIIiwianRpIjoiYmU0ZmE4MWEtZWFmMi00YmY5LTlmYzYtMzFmN2I0NzRiMzljIn0."
@@ -23,17 +32,17 @@ const char* FIRMWARE_URL  = "https://raw.githubusercontent.com/edzenis/esp32mx/m
 const int   SENSOR_PIN    = 4;                 // GPIO pin for your sensor
 
 // ==== TIMING CONSTANTS ====
-const unsigned long REPORT_INTERVAL    = 60000UL; // 60 000 ms = 60 s between reports
-const unsigned long OTA_INTERVAL       = 60000UL; // 60 s between OTA checks
-const unsigned long COUNTDOWN_INTERVAL = 1000UL;  // 1 s between countdown prints
+const unsigned long REPORT_INTERVAL    = 60000UL; // 60,000 ms = 60 s between reports
+const unsigned long OTA_INTERVAL       = 60000UL; // 60 s between OTA checks
+const unsigned long COUNTDOWN_INTERVAL = 1000UL;  // 1 s between countdown prints
 
 // ===== STATE =====
 Preferences prefs;            // Flash storage for version & meter data
-unsigned long activeMs       = 0; // How many ms sensor was HIGH
-unsigned long lastLoopMs     = 0; // Timestamp of last loop()
-unsigned long lastReportMs   = 0; // Timestamp of last MaintainX report
-unsigned long lastOtaMs      = 0; // Timestamp of last OTA check
-unsigned long lastCountdownMs= 0; // Timestamp of last countdown print
+unsigned long activeMs        = 0; // How many ms sensor was HIGH
+unsigned long lastLoopMs      = 0; // Timestamp of last loop()
+unsigned long lastReportMs    = 0; // Timestamp of last MaintainX report
+unsigned long lastOtaMs       = 0; // Timestamp of last OTA check
+unsigned long lastCountdownMs = 0; // Timestamp of last countdown print
 
 void setup() {
   Serial.begin(115200);         // Open Serial for debug
@@ -46,15 +55,15 @@ void setup() {
 
   pinMode(SENSOR_PIN, INPUT_PULLDOWN); // Set sensor pin as input with pull-down
 
-  // Connect to Wi‑Fi
-  Serial.print("Wi‑Fi connecting to "); Serial.println(WIFI_SSID);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD); // Start Wi‑Fi
+  // Connect to Wi-Fi
+  Serial.print("Wi-Fi connecting to "); Serial.println(WIFI_SSID);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD); // Start Wi-Fi
   while (WiFi.status() != WL_CONNECTED) { // Wait until connected
-    delay(500); 
-    Serial.print('.');                // Print a dot every half‑second
+    delay(500);
+    Serial.print('.');                // Print a dot every half-second
   }
-  Serial.println();                   
-  Serial.println("Wi‑Fi connected: " + WiFi.localIP().toString());
+  Serial.println();
+  Serial.println("Wi-Fi connected: " + WiFi.localIP().toString());
 
   // Initialize our timers
   lastLoopMs      = millis();
@@ -73,23 +82,33 @@ void loop() {
     activeMs += delta;                        // Accumulate ms HIGH
   }
 
-  // --- Countdown to next report ---
-  unsigned long sinceReport = now - lastReportMs;                // ms since last report
-  unsigned long untilReport = (sinceReport < REPORT_INTERVAL)    // if less than 60s
-                            ? REPORT_INTERVAL - sinceReport      // time left
-                            : 0;                                 // otherwise 0
-  if (now - lastCountdownMs >= COUNTDOWN_INTERVAL) {             // once per second
-    lastCountdownMs = now;                                        
-    unsigned long secsLeft = (untilReport + 999) / 1000;         // round up
-    Serial.print("Next report in "); 
-    Serial.print(secsLeft); 
-    Serial.println(" s");
+  // --- Per-second countdown prints (MaintainX report + OTA check) ---
+  if (now - lastCountdownMs >= COUNTDOWN_INTERVAL) {  // once per second
+    lastCountdownMs = now;                            // reset countdown timer
+
+    // MaintainX report countdown
+    unsigned long sinceReport = now - lastReportMs;                 // ms since last report
+    unsigned long untilReport = (sinceReport < REPORT_INTERVAL)     // if < interval
+                              ? (REPORT_INTERVAL - sinceReport)     // time left
+                              : 0;                                  // otherwise 0
+    unsigned long secsReportLeft = (untilReport + 999UL) / 1000UL;  // round up to s
+
+    // OTA check countdown
+    unsigned long sinceOta = now - lastOtaMs;                        // ms since last OTA check
+    unsigned long untilOta = (sinceOta < OTA_INTERVAL)               // if < interval
+                           ? (OTA_INTERVAL - sinceOta)               // time left
+                           : 0;                                      // otherwise 0
+    unsigned long secsOtaLeft = (untilOta + 999UL) / 1000UL;         // round up to s
+
+    Serial.print("Next report in "); Serial.print(secsReportLeft); Serial.print(" s");
+    Serial.print(" | Next OTA check in "); Serial.print(secsOtaLeft); Serial.println(" s");
   }
 
   // --- REPORT to MaintainX every REPORT_INTERVAL ---
-  if (sinceReport >= REPORT_INTERVAL) {        
+  unsigned long sinceReport = now - lastReportMs;
+  if (sinceReport >= REPORT_INTERVAL) {
     Serial.println("Reporting to MaintainX...");
-    HTTPClient http;                         
+    HTTPClient http;
     http.begin(MAINTX_URL);                  // Set API endpoint
     http.addHeader("Authorization", MAINTX_TOKEN);  // Add full token
     http.addHeader("Content-Type", "application/json");
@@ -99,7 +118,7 @@ void loop() {
                 + ",\"value\":" + String(secs) + "}]"; // JSON payload
 
     int code = http.POST(body);               // Send data
-    Serial.println("Report HTTP code: " + String(code)); 
+    Serial.println("Report HTTP code: " + String(code));
     if (code >= 200 && code < 300) {          // On success
       prefs.putULong("activeMs", activeMs);   // Save cumulative time
       Serial.println("MaintainX data saved");
@@ -111,22 +130,23 @@ void loop() {
   }
 
   // --- OTA update every OTA_INTERVAL ---
-  if (now - lastOtaMs >= OTA_INTERVAL) {     
-    Serial.println("\n=== OTA Check ===");
+  if (now - lastOtaMs >= OTA_INTERVAL) {
+    Serial.println();
+    Serial.println("=== OTA Check ===");
 
     float oldVer = prefs.getFloat("ver", 0.0); // Read saved version
     Serial.print("Saved version: "); Serial.println(oldVer);
 
     // Fetch version.txt
-    WiFiClientSecure client;                  
-    client.setInsecure();                     // Skip SSL cert check
-    HTTPClient httpV;                        
+    WiFiClientSecure client;
+    client.setInsecure();                     // Skip SSL cert check (NOT for production)
+    HTTPClient httpV;
     Serial.println("Fetching version.txt...");
-    httpV.begin(client, VERSION_URL);         
-    int vcode = httpV.GET();                 
-    if (vcode == HTTP_CODE_OK) {             
-      String newVerStr = httpV.getString();  
-      newVerStr.trim();                      
+    httpV.begin(client, VERSION_URL);
+    int vcode = httpV.GET();
+    if (vcode == HTTP_CODE_OK) {
+      String newVerStr = httpV.getString();
+      newVerStr.trim();
       Serial.print("Raw repo version: "); Serial.println(newVerStr);
 
       // Remove leading 'v' if present
@@ -151,20 +171,23 @@ void loop() {
           Serial.println("OTA successful!");
           prefs.putFloat("ver", newVer);     // Save the new version
           Serial.println("Rebooting now...");
-          ESP.restart();                     // Reboot into new firmware
-        } else {                             // If OTA failed
-          Serial.printf("HTTPUpdate failed (%d): %s\n",
-                        httpUpdate.getLastError(),
-                        httpUpdate.getLastErrorString().c_str());
+          ESP.restart();                      // Reboot into new firmware
+        } else {                              // If OTA failed
+          Serial.print("HTTPUpdate failed (error ");
+          Serial.print(httpUpdate.getLastError());
+          Serial.print("): ");
+          Serial.println(httpUpdate.getLastErrorString());
         }
       } else {
         Serial.println("No newer version");  // Already up-to-date
       }
     } else {
-      Serial.printf("version.txt fetch failed, HTTP %d\n", vcode);
+      Serial.print("version.txt fetch failed, HTTP ");
+      Serial.println(vcode);
     }
     httpV.end();                              // Clean up
     lastOtaMs = now;                          // Reset OTA timer
-    Serial.println("=== OTA Done ===\n");
+    Serial.println("=== OTA Done ===");
+    Serial.println();
   }
 }
