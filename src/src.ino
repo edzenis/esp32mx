@@ -12,6 +12,7 @@
  * 2025-07-17b: Debug update – ensure countdown prints immediately after setup,
  *             and prints reliably even if long blocking HTTP calls occur.
  *             (We print BEFORE running report/OTA blocks each loop.)
+ * test for OTA server
  */
 
 // ===== USER CONFIG =====
