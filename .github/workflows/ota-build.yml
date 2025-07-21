@@ -8,7 +8,6 @@ on:
     paths:
       - 'src/**'
 
-# Give the workflow permission to push commits
 permissions:
   contents: write
 
@@ -109,3 +108,16 @@ jobs:
           # Push to the same branch the workflow ran from (usually main)
           git push origin HEAD:${BRANCH}
           echo "✔️  firmware.bin pushed to ${BRANCH}."
+
+      #################################################################
+      # 7) Upload firmware.bin to OTA server via SCP
+      #################################################################
+      - name: Upload firmware.bin to OTA server
+        env:
+          OTA_SERVER: 65.109.173.41
+          OTA_PATH: /srv/firmware/firmware.bin
+          OTA_USER: root
+        run: |
+          set -e
+          scp -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=no build/firmware.bin ${OTA_USER}@${OTA_SERVER}:${OTA_PATH}
+          echo "✔️  firmware.bin uploaded to OTA server."
