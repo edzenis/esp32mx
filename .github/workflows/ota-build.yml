@@ -1,9 +1,7 @@
 name: Build & Publish OTA Firmware
 
 on:
-  # Manual “Run workflow” button
   workflow_dispatch:
-  # Auto-build when your sketch changes
   push:
     paths:
       - 'src/**'
@@ -20,104 +18,66 @@ jobs:
     runs-on: self-hosted
 
     steps:
-      #################################################################
-      # 1) Checkout full repo history (needed to commit & push)
-      #################################################################
+      # 1) Checkout everything so we can commit later
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: false   # we'll inject our own tokened remote
 
-      #################################################################
-      # 2) Sanity check tools
-      #################################################################
-      - name: Verify toolchain on runner
+      # 2) Verify Arduino CLI is present
+      - name: Verify toolchain
         run: |
-          set -e
-          command -v arduino-cli >/dev/null 2>&1 || { echo "❌ arduino-cli missing"; exit 1; }
+          command -v arduino-cli >/dev/null \
+            || { echo "❌ arduino-cli missing"; exit 1; }
           arduino-cli version
-          command -v git >/dev/null 2>&1 || { echo "❌ git missing"; exit 1; }
-          git --version
 
-      #################################################################
-      # 3) Clean build directory
-      #################################################################
+      # 3) Clean slate
       - name: Reset build directory
         run: |
           rm -rf build
           mkdir build
 
-      #################################################################
-      # 4) Compile sketch into build/
-      #################################################################
+      # 4) Compile exactly the src.ino file into build/
       - name: Compile firmware
         run: |
-          set -e
           arduino-cli core update-index
-          if ! arduino-cli core list | grep -q '^esp32:esp32'; then
-            arduino-cli core install esp32:esp32
-          fi
+          arduino-cli core install esp32:esp32 || true
           arduino-cli compile \
             --fqbn esp32:esp32:esp32 \
             --output-dir build \
-            src
+            src/src.ino
 
-      #################################################################
-      # 5) Copy ONLY the firmware binary (ignore bootloader/merged/etc.)
-      #################################################################
+      # 5) Copy out just the .bin
       - name: Prepare firmware.bin
         run: |
-          set -e
-          echo "build/ contents:"
-          ls -lh build || true
-          if [ ! -f build/src.ino.bin ]; then
-            echo "❌ build/src.ino.bin not found"; exit 1
-          fi
           cp build/src.ino.bin build/firmware.bin
           ls -lh build/firmware.bin
 
-      #################################################################
-      # 6) Commit & push firmware.bin (token auth)
-      #################################################################
+      # 6) Commit & push if changed
       - name: Commit & Push firmware.bin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}      # owner/repo
-          BRANCH: ${{ github.ref_name }}      # current branch name (e.g. main)
         run: |
-          set -e
-
-          # Trust workspace (required on some self-hosted runners)
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-          # Inject tokened remote so push is authenticated
-          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
-
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add build/firmware.bin || true
-
+          git remote set-url origin \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
+          git add build/firmware.bin
           if git diff --cached --quiet; then
-            echo "ℹ️  No firmware changes; skipping commit."
-            exit 0
+            echo "ℹ️ No changes to firmware.bin — skipping commit."
+          else
+            git commit -m "🔄 Automated firmware build"
+            git push origin HEAD:${{ github.ref_name }}
+            echo "✔️ firmware.bin pushed."
           fi
 
-          git commit -m "🔄 Automated firmware build for version $(cat version.txt 2>/dev/null || echo 'unknown')"
-          # Push to the same branch the workflow ran from (usually main)
-          git push origin HEAD:${BRANCH}
-          echo "✔️  firmware.bin pushed to ${BRANCH}."
-
-      #################################################################
-      # 7) Upload firmware.bin to OTA server via SCP
-      #################################################################
+      # 7) Upload via SCP using the mounted ~/.ssh
       - name: Upload firmware.bin to OTA server
         env:
+          OTA_USER: root
           OTA_SERVER: 65.109.173.41
           OTA_PATH: /srv/firmware/firmware.bin
-          OTA_USER: root
         run: |
-          set -e
-          scp -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=no build/firmware.bin ${OTA_USER}@${OTA_SERVER}:${OTA_PATH}
-          echo "✔️  firmware.bin uploaded to OTA server."
+          scp -i ~/.ssh/id_ed25519 \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              build/firmware.bin \
+              $OTA_USER@$OTA_SERVER:$OTA_PATH
