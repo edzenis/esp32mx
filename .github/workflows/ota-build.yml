@@ -1,3 +1,4 @@
+# .github/workflows/ota-build.yml
 name: Build & Publish OTA Firmware
 
 on:
@@ -14,21 +15,23 @@ jobs:
     runs-on: self-hosted
 
     steps:
-      # 1) Checkout your code
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      # 2) Sanity‐check that Arduino CLI is present
       - name: Verify Arduino CLI
         run: |
           command -v arduino-cli >/dev/null \
             || { echo "❌ arduino-cli missing"; exit 1; }
           arduino-cli version
 
-      # 3) Clean & compile the sketch in src/src.ino
+      - name: Install ESP32 core
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32 || true
+
       - name: Compile firmware
         run: |
           rm -rf build && mkdir build
@@ -37,17 +40,13 @@ jobs:
             --output-dir build \
             src
 
-      # 4) Copy out the generated .bin to firmware.bin at repo root
       - name: Prepare firmware.bin
         run: |
           BIN=$(find build -maxdepth 1 -type f -name '*.bin' | head -n1)
-          if [ -z "$BIN" ]; then
-            echo "❌ No .bin found in build/"; exit 1
-          fi
+          [ -n "$BIN" ] || { echo "❌ No .bin found"; exit 1; }
           cp "$BIN" firmware.bin
           ls -lh firmware.bin
 
-      # 5) Commit & push firmware.bin only if it changed
       - name: Commit & Push firmware.bin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -63,7 +62,6 @@ jobs:
             git push origin HEAD:${{ github.ref_name }}
           fi
 
-      # 6) Upload via SSH using the mounted key and known_hosts
       - name: Upload firmware.bin to OTA server
         env:
           OTA_USER: root
