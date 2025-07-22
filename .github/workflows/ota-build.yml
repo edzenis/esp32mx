@@ -1,3 +1,4 @@
+# .github/workflows/ota-build.yml
 name: Build & Publish OTA Firmware
 
 on:
@@ -9,51 +10,43 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: ota-build-main
-  cancel-in-progress: true
-
 jobs:
   build:
     runs-on: self-hosted
 
     steps:
-      # 1) Checkout everything so we can commit later
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      # 2) Verify Arduino CLI is present
-      - name: Verify toolchain
-        run: |
-          command -v arduino-cli >/dev/null \
-            || { echo "❌ arduino-cli missing"; exit 1; }
-          arduino-cli version
+      - name: Set up Arduino CLI
+        uses: arduino/setup-arduino@v1
+        with:
+          version: 'latest'
 
-      # 3) Clean slate
-      - name: Reset build directory
-        run: |
-          rm -rf build
-          mkdir build
-
-      # 4) Compile exactly the src.ino file into build/
       - name: Compile firmware
         run: |
           arduino-cli core update-index
           arduino-cli core install esp32:esp32 || true
+          rm -rf build && mkdir build
           arduino-cli compile \
             --fqbn esp32:esp32:esp32 \
             --output-dir build \
             src/src.ino
 
-      # 5) Copy out just the .bin
       - name: Prepare firmware.bin
         run: |
-          cp build/src.ino.bin build/firmware.bin
-          ls -lh build/firmware.bin
+          # Grab the first .bin the compiler generated
+          BIN=$(find build -maxdepth 1 -type f -name '*.bin' | head -n1)
+          if [ -z "$BIN" ]; then
+            echo "❌ No .bin found in build/"; exit 1
+          fi
+          echo "✅ Found binary: $BIN"
+          cp "$BIN" firmware.bin
+          ls -lh firmware.bin
 
-      # 6) Commit & push if changed
       - name: Commit & Push firmware.bin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -61,16 +54,14 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git remote set-url origin \
             "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
-          git add build/firmware.bin
+          git add firmware.bin
           if git diff --cached --quiet; then
-            echo "ℹ️ No changes to firmware.bin — skipping commit."
+            echo "ℹ️ No changes to firmware.bin; skipping commit."
           else
-            git commit -m "🔄 Automated firmware build"
+            git commit -m "🔄 Automated firmware build: $(cat version.txt)"
             git push origin HEAD:${{ github.ref_name }}
-            echo "✔️ firmware.bin pushed."
           fi
 
-      # 7) Upload via SCP using the mounted ~/.ssh
       - name: Upload firmware.bin to OTA server
         env:
           OTA_USER: root
@@ -79,5 +70,5 @@ jobs:
         run: |
           scp -i ~/.ssh/id_ed25519 \
               -o UserKnownHostsFile=~/.ssh/known_hosts \
-              build/firmware.bin \
+              firmware.bin \
               $OTA_USER@$OTA_SERVER:$OTA_PATH
