@@ -23,14 +23,8 @@ jobs:
 
       - name: Verify Arduino CLI
         run: |
-          command -v arduino-cli >/dev/null \
-            || { echo "❌ arduino-cli missing"; exit 1; }
+          command -v arduino-cli >/dev/null || exit 1
           arduino-cli version
-
-      - name: Install ESP32 core
-        run: |
-          arduino-cli core update-index
-          arduino-cli core install esp32:esp32 || true
 
       - name: Compile firmware
         run: |
@@ -45,15 +39,22 @@ jobs:
           BIN=$(find build -maxdepth 1 -type f -name '*.bin' | head -n1)
           [ -n "$BIN" ] || { echo "❌ No .bin found"; exit 1; }
           cp "$BIN" firmware.bin
-          ls -lh firmware.bin
 
       - name: Commit & Push firmware.bin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Ensure the runner can safely write here
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+          # Set identity so Git can commit
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Point origin at the tokened URL
           git remote set-url origin \
             "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
+
           git add firmware.bin
           if git diff --cached --quiet; then
             echo "ℹ️ No changes to firmware.bin—skipping commit."
