@@ -24,26 +24,26 @@ jobs:
       - name: Set up Arduino CLI
         uses: arduino/setup-arduino@v1
         with:
-          version: 'latest'
+          version: latest
 
       - name: Compile firmware
         run: |
-          arduino-cli core update-index
-          arduino-cli core install esp32:esp32 || true
+          # ensure clean build dir
           rm -rf build && mkdir build
+          # compile the sketch in src/src.ino
           arduino-cli compile \
             --fqbn esp32:esp32:esp32 \
             --output-dir build \
-            src/src.ino
+            src
 
       - name: Prepare firmware.bin
         run: |
-          # Grab the first .bin the compiler generated
+          # grab whatever .bin was generated
           BIN=$(find build -maxdepth 1 -type f -name '*.bin' | head -n1)
           if [ -z "$BIN" ]; then
             echo "❌ No .bin found in build/"; exit 1
           fi
-          echo "✅ Found binary: $BIN"
+          echo "→ found binary: $BIN"
           cp "$BIN" firmware.bin
           ls -lh firmware.bin
 
