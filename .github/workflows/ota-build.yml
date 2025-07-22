@@ -1,4 +1,3 @@
-# .github/workflows/ota-build.yml
 name: Build & Publish OTA Firmware
 
 on:
@@ -17,20 +16,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
 
-      - name: Set up Arduino CLI
-        uses: arduino/setup-arduino@v1
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2    # ← fixed here
         with:
-          version: latest
+          version: 'latest'
 
       - name: Compile firmware
         run: |
-          # ensure clean build dir
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32 || true
           rm -rf build && mkdir build
-          # compile the sketch in src/src.ino
           arduino-cli compile \
             --fqbn esp32:esp32:esp32 \
             --output-dir build \
@@ -38,12 +34,8 @@ jobs:
 
       - name: Prepare firmware.bin
         run: |
-          # grab whatever .bin was generated
           BIN=$(find build -maxdepth 1 -type f -name '*.bin' | head -n1)
-          if [ -z "$BIN" ]; then
-            echo "❌ No .bin found in build/"; exit 1
-          fi
-          echo "→ found binary: $BIN"
+          [ -n "$BIN" ] || { echo "❌ No .bin found"; exit 1; }
           cp "$BIN" firmware.bin
           ls -lh firmware.bin
 
@@ -56,7 +48,7 @@ jobs:
             "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
           git add firmware.bin
           if git diff --cached --quiet; then
-            echo "ℹ️ No changes to firmware.bin; skipping commit."
+            echo "ℹ️ No changes—skipping commit."
           else
             git commit -m "🔄 Automated firmware build: $(cat version.txt)"
             git push origin HEAD:${{ github.ref_name }}
